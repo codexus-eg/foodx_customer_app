@@ -1,0 +1,6 @@
+# أضف هذه الأسطر داخل pubspec.yaml تحت قسم flutter:
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/foodx_logo.png
+    - assets/images/foodx_icon.png

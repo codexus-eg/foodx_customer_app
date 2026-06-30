@@ -1,0 +1,16 @@
+Foodx Customer App - Fixed for Maram VPS
+
+Changes applied:
+1. API base URL changed to http://51.241.184.58/api
+2. Storage URL changed to http://51.241.184.58/storage
+3. Product image URL handling now keeps /storage/ URLs instead of converting them to /uploads/.
+4. Build cache folders are excluded from this ZIP: build/, .dart_tool/.
+
+Important server note for notifications:
+The app sends device token to /api/customer/device-token with fields:
+- token
+- app_type
+- device_type
+- device_name
+
+Make sure the server user_device_tokens table has columns: user_id, token, app_type, device_type, device_name, is_active.
