@@ -2,7 +2,7 @@ name: foodx_customer_app
 description: "Foodx Customer App"
 publish_to: "none"
 
-version: 1.0.0+3
+version: 1.0.0+4
 
 environment:
   sdk: ^3.12.1
@@ -42,5 +42,6 @@ flutter:
 flutter_launcher_icons:
   ios: true
   android: true
-  image_path: "assets/images/foodx_icon.png"
+  image_path: "assets/images/foodx_logo.png"
   min_sdk_android: 21
+  remove_alpha_ios: true
