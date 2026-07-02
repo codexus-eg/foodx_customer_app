@@ -68,11 +68,45 @@ String productImageUrl(dynamic image) {
 final FlutterLocalNotificationsPlugin customerLocalNotifications =
     FlutterLocalNotificationsPlugin();
 
+const String customerNotificationChannelId = 'customer_heads_up_channel_v2';
+
 @pragma('vm:entry-point')
 Future<void> customerFirebaseMessagingBackgroundHandler(
   RemoteMessage message,
 ) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const iosSettings = DarwinInitializationSettings();
+  const initSettings = InitializationSettings(
+    android: androidSettings,
+    iOS: iosSettings,
+  );
+
+  await customerLocalNotifications.initialize(settings: initSettings);
+
+  await customerLocalNotifications
+      .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin
+      >()
+      ?.createNotificationChannel(CustomerNotificationService.customerChannel);
+
+  final title =
+      message.notification?.title ??
+      message.data['title'] ??
+      message.data['notification_title'] ??
+      'إشعار جديد';
+
+  final body =
+      message.notification?.body ??
+      message.data['body'] ??
+      message.data['notification_body'] ??
+      'وصل إشعار جديد إلى حسابك';
+
+  await CustomerNotificationService.showLocalNotification(
+    title: title.toString(),
+    body: body.toString(),
+  );
 }
 
 class CustomerNotificationService {
@@ -80,11 +114,13 @@ class CustomerNotificationService {
 
   static const AndroidNotificationChannel customerChannel =
       AndroidNotificationChannel(
-        'customer_notifications_channel',
-        'إشعارات الزبون',
-        description: 'تنبيهات وإشعارات تطبيق الزبون',
+        customerNotificationChannelId,
+        'تنبيهات فودكس للزبون',
+        description: 'تنبيهات الطلبات والعروض وإشعارات حساب الزبون',
         importance: Importance.max,
         playSound: true,
+        enableVibration: true,
+        showBadge: true,
       );
 
   static Future<void> init() async {
@@ -94,6 +130,13 @@ class CustomerNotificationService {
         badge: true,
         sound: true,
       );
+
+      await FirebaseMessaging.instance
+          .setForegroundNotificationPresentationOptions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
 
       const androidSettings = AndroidInitializationSettings(
         '@mipmap/ic_launcher',
@@ -118,17 +161,30 @@ class CustomerNotificationService {
           >()
           ?.createNotificationChannel(customerChannel);
 
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
         final title =
             message.notification?.title ??
             message.data['title'] ??
+            message.data['notification_title'] ??
             'إشعار جديد';
         final body =
             message.notification?.body ??
             message.data['body'] ??
+            message.data['notification_body'] ??
             'وصل إشعار جديد إلى حسابك';
 
-        showLocalNotification(title: title, body: body);
+        debugPrint(
+          'CUSTOMER FCM FOREGROUND MESSAGE: title=$title body=$body data=${message.data}',
+        );
+
+        await showLocalNotification(
+          title: title.toString(),
+          body: body.toString(),
+        );
+      });
+
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        debugPrint('CUSTOMER NOTIFICATION OPENED: ${message.data}');
       });
     } catch (e) {
       debugPrint('CUSTOMER NOTIFICATION INIT ERROR: $e');
@@ -141,13 +197,18 @@ class CustomerNotificationService {
   }) async {
     try {
       const androidDetails = AndroidNotificationDetails(
-        'customer_notifications_channel',
-        'إشعارات الزبون',
-        channelDescription: 'تنبيهات وإشعارات تطبيق الزبون',
+        customerNotificationChannelId,
+        'تنبيهات فودكس للزبون',
+        channelDescription: 'تنبيهات الطلبات والعروض وإشعارات حساب الزبون',
         importance: Importance.max,
-        priority: Priority.high,
+        priority: Priority.max,
+        icon: '@mipmap/ic_launcher',
         playSound: true,
         enableVibration: true,
+        fullScreenIntent: true,
+        visibility: NotificationVisibility.public,
+        category: AndroidNotificationCategory.message,
+        ticker: 'Foodx Customer',
       );
 
       const iosDetails = DarwinNotificationDetails(
@@ -3397,6 +3458,274 @@ class _SocialLinksPageState extends State<SocialLinksPage> {
   }
 }
 
+class CustomerNotificationSettingsPage extends StatefulWidget {
+  const CustomerNotificationSettingsPage({super.key});
+
+  @override
+  State<CustomerNotificationSettingsPage> createState() =>
+      _CustomerNotificationSettingsPageState();
+}
+
+class _CustomerNotificationSettingsPageState
+    extends State<CustomerNotificationSettingsPage> {
+  NotificationSettings? notificationSettings;
+  String? fcmToken;
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    loadStatus();
+  }
+
+  Future<void> loadStatus() async {
+    setState(() => loading = true);
+
+    try {
+      final settings = await FirebaseMessaging.instance
+          .getNotificationSettings();
+      final token = await FirebaseMessaging.instance.getToken();
+
+      if (!mounted) return;
+
+      setState(() {
+        notificationSettings = settings;
+        fcmToken = token;
+        loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => loading = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('تعذر فحص الإشعارات: $e')));
+    }
+  }
+
+  Future<void> requestNotificationsAgain() async {
+    try {
+      await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+
+      await FirebaseMessaging.instance
+          .setForegroundNotificationPresentationOptions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+
+      await CustomerNotificationService.init();
+      await loadStatus();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم تحديث حالة الإشعارات')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('تعذر طلب الصلاحية: $e')));
+    }
+  }
+
+  Future<void> openSystemSettings() async {
+    try {
+      await Geolocator.openAppSettings();
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('افتح إعدادات التطبيق يدوياً من إعدادات الهاتف'),
+        ),
+      );
+    }
+  }
+
+  String authorizationText() {
+    final status = notificationSettings?.authorizationStatus;
+    if (status == AuthorizationStatus.authorized) return 'مفعلة';
+    if (status == AuthorizationStatus.provisional) return 'مفعلة مؤقتاً';
+    if (status == AuthorizationStatus.denied) return 'مغلقة من إعدادات الهاتف';
+    if (status == AuthorizationStatus.notDetermined) return 'لم يتم طلبها بعد';
+    return 'غير معروفة';
+  }
+
+  bool get isAuthorized {
+    final status = notificationSettings?.authorizationStatus;
+    return status == AuthorizationStatus.authorized ||
+        status == AuthorizationStatus.provisional;
+  }
+
+  Widget statusCard({
+    required IconData icon,
+    required String title,
+    required String value,
+    required bool ok,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: ok
+              ? Colors.green.withValues(alpha: .30)
+              : Colors.orange.withValues(alpha: .35),
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 14,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: ok
+                ? const Color(0xffe8f5e9)
+                : const Color(0xfffff4d6),
+            child: Icon(icon, color: ok ? Colors.green : VipTheme.yellowDark),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: VipTheme.navy,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: VipTheme.muted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(
+            ok ? Icons.check_circle : Icons.warning_amber_rounded,
+            color: ok ? Colors.green : Colors.orange,
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        backgroundColor: VipTheme.page,
+        appBar: AppBar(title: const Text('فحص الإشعارات')),
+        body: loading
+            ? const Center(
+                child: CircularProgressIndicator(color: VipTheme.yellowDark),
+              )
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [VipTheme.yellow, VipTheme.yellowDark],
+                      ),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'إشعارات Foodx المنبثقة',
+                          style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w900,
+                            color: VipTheme.navy,
+                          ),
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          'هذه الصفحة تساعدك على تفعيل التنبيهات مثل واتساب وماسنجر. بعض الأجهزة تحتاج تفعيل السماح من إعدادات الهاتف والبطارية.',
+                          style: TextStyle(
+                            color: Color(0xff4f3600),
+                            fontWeight: FontWeight.w700,
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  statusCard(
+                    icon: Icons.notifications_active_rounded,
+                    title: 'صلاحية الإشعارات',
+                    value: authorizationText(),
+                    ok: isAuthorized,
+                  ),
+                  statusCard(
+                    icon: Icons.vpn_key_rounded,
+                    title: 'رمز الجهاز FCM',
+                    value: (fcmToken == null || fcmToken!.isEmpty)
+                        ? 'غير محفوظ'
+                        : 'جاهز ومحفوظ',
+                    ok: fcmToken != null && fcmToken!.isNotEmpty,
+                  ),
+                  statusCard(
+                    icon: Icons.campaign_rounded,
+                    title: 'قناة الإشعار المنبثق',
+                    value: customerNotificationChannelId,
+                    ok: true,
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    onPressed: requestNotificationsAgain,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('إعادة طلب وتحديث الإشعارات'),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: openSystemSettings,
+                    icon: const Icon(Icons.settings_rounded),
+                    label: const Text('فتح إعدادات التطبيق'),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: const Color(0xffffe8a3)),
+                    ),
+                    child: const Text(
+                      'تنبيه مهم: في أجهزة شاومي، هواوي، أوبو، فيفو وريلمي قد تحتاج من إعدادات الهاتف إلى تفعيل: السماح بالإشعارات، الظهور المنبثق، التشغيل التلقائي، وعدم تقييد البطارية.',
+                      style: TextStyle(
+                        height: 1.6,
+                        fontWeight: FontWeight.w700,
+                        color: VipTheme.navy,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
 class UserProfilePage extends StatefulWidget {
   const UserProfilePage({super.key});
 
@@ -3539,6 +3868,16 @@ class _UserProfilePageState extends State<UserProfilePage> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => const CustomerNotificationsPage(),
+                  ),
+                ),
+              ),
+              menuItem(
+                icon: Icons.notifications_active_rounded,
+                title: 'فحص الإشعارات والتنبيه المنبثق',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CustomerNotificationSettingsPage(),
                   ),
                 ),
               ),

@@ -357,4 +357,13 @@ class ApiService {
 
     return jsonDecode(response.body);
   }
+
+       static Future<Map<String, dynamic>> deleteCustomerAccount(String token) async {
+    final response = await http.delete(
+      Uri.parse("$baseUrl/customer/delete-account"),
+      headers: authHeaders(token),
+    );
+
+    return decodeResponse(response);
+  }
 }
